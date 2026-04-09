@@ -14,9 +14,9 @@ export default async function handler(req, res) {
   }
 
   try {
-    // ESPN PGA leaderboard — returns current/most recent event
+    // ESPN Golf leaderboard — returns current/most recent event
     const response = await fetch(
-      "https://site.api.espn.com/apis/site/v2/sports/golf/pga/leaderboard",
+      "https://site.api.espn.com/apis/site/v2/sports/golf/leaderboard",
       {
         headers: {
           "User-Agent": "MastersPool/1.0",
@@ -50,26 +50,40 @@ export default async function handler(req, res) {
       const athlete = c.athlete || {};
       const status = c.status || {};
       const linescores = c.linescores || [];
+      const statistics = c.statistics || [];
 
-      // Parse score to par
+      // Parse score to par from statistics array
       let scoreToPar = 0;
-      const scoreDisplay = c.score?.displayValue || c.score?.value;
-      if (scoreDisplay === "E" || scoreDisplay === "0") {
-        scoreToPar = 0;
-      } else if (scoreDisplay) {
-        const parsed = parseInt(scoreDisplay, 10);
-        if (!isNaN(parsed)) scoreToPar = parsed;
+      const scoreToParStat = statistics.find((s) => s.name === "scoreToPar");
+      if (scoreToParStat) {
+        if (scoreToParStat.displayValue === "E") {
+          scoreToPar = 0;
+        } else if (scoreToParStat.value != null) {
+          scoreToPar = Number(scoreToParStat.value);
+        } else {
+          const parsed = parseInt(scoreToParStat.displayValue, 10);
+          if (!isNaN(parsed)) scoreToPar = parsed;
+        }
+      } else {
+        // Fallback to score.displayValue
+        const scoreDisplay = c.score?.displayValue;
+        if (scoreDisplay === "E") {
+          scoreToPar = 0;
+        } else if (scoreDisplay) {
+          const parsed = parseInt(scoreDisplay, 10);
+          if (!isNaN(parsed)) scoreToPar = parsed;
+        }
       }
 
-      // Parse today's score
+      // Parse today's round score from current round linescore
       let today = null;
-      const todayStat = (c.statistics || []).find(
-        (s) => s.name === "today" || s.name === "currentRoundScore"
-      );
-      if (todayStat?.displayValue) {
-        if (todayStat.displayValue === "E") today = 0;
-        else {
-          const p = parseInt(todayStat.displayValue, 10);
+      const currentRound = (event.status?.period || 1) - 1;
+      const currentLinescore = linescores[currentRound];
+      if (currentLinescore?.displayValue) {
+        if (currentLinescore.displayValue === "E") {
+          today = 0;
+        } else {
+          const p = parseInt(currentLinescore.displayValue, 10);
           if (!isNaN(p)) today = p;
         }
       }
@@ -93,7 +107,7 @@ export default async function handler(req, res) {
         position: status.position?.displayName || c.sortOrder?.toString() || "",
         scoreToPar,
         today,
-        thru: status.thru != null ? status.thru : status.displayValue || "",
+        thru: status.thru != null ? (status.thru === 18 ? "F" : status.thru.toString()) : status.displayValue || "",
         rounds,
         status: isCut ? "cut" : "active",
         isCut,
@@ -103,9 +117,15 @@ export default async function handler(req, res) {
     // Determine tournament status
     let tournamentStatus = "in_progress";
     const eventStatus = event.status?.type?.name || "";
-    if (eventStatus.includes("PRE") || eventStatus.includes("SCHEDULED")) {
+    if (
+      eventStatus.includes("PRE") ||
+      eventStatus.includes("SCHEDULED")
+    ) {
       tournamentStatus = "pre_event";
-    } else if (eventStatus.includes("FINAL") || eventStatus.includes("POST")) {
+    } else if (
+      eventStatus.includes("FINAL") ||
+      eventStatus.includes("POST")
+    ) {
       tournamentStatus = "post_event";
     }
 
@@ -142,4 +162,4 @@ export default async function handler(req, res) {
       error: "Failed to fetch live scores. Retrying...",
     });
   }
-          }
+}
