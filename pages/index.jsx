@@ -95,7 +95,6 @@ const CATEGORIES = {
 };
 
 // ─── Name Matching ────────────────────────────────────────────
-// Normalize for matching: strip accents, lowercase, trim
 function normalize(name) {
   return name
     .normalize("NFD")
@@ -113,18 +112,15 @@ function getLastName(name) {
 function matchGolfer(pickName, espnGolfers) {
   const normPick = normalize(pickName);
 
-  // 1. Exact match
   const exact = espnGolfers.find((g) => normalize(g.name) === normPick);
   if (exact) return exact;
 
-  // 2. Last name match
   const pickLast = normalize(getLastName(pickName));
   const lastMatches = espnGolfers.filter(
     (g) => normalize(getLastName(g.name)) === pickLast
   );
   if (lastMatches.length === 1) return lastMatches[0];
 
-  // 3. If multiple last name matches, disambiguate with first name
   if (lastMatches.length > 1) {
     const pickFirst = normalize(pickName.split(/\s+/)[0]);
     const firstMatch = lastMatches.find((g) =>
@@ -133,7 +129,6 @@ function matchGolfer(pickName, espnGolfers) {
     if (firstMatch) return firstMatch;
   }
 
-  // 4. Partial / contains match
   const partial = espnGolfers.find(
     (g) => normalize(g.name).includes(normPick) || normPick.includes(normalize(g.name))
   );
@@ -166,7 +161,6 @@ export default function MastersPool() {
   const [expandedPlayer, setExpandedPlayer] = useState(null);
   const [countdown, setCountdown] = useState(60);
 
-  // Fetch live scores
   const fetchScores = useCallback(async () => {
     try {
       const res = await fetch("/api/leaderboard");
@@ -183,14 +177,12 @@ export default function MastersPool() {
     }
   }, []);
 
-  // Auto-refresh every 60 seconds
   useEffect(() => {
     fetchScores();
     const interval = setInterval(fetchScores, 60000);
     return () => clearInterval(interval);
   }, [fetchScores]);
 
-  // Countdown timer
   useEffect(() => {
     const timer = setInterval(() => {
       setCountdown((c) => (c > 0 ? c - 1 : 60));
@@ -213,16 +205,11 @@ export default function MastersPool() {
         matched++;
         totalScore += live.scoreToPar || 0;
         if (!live.isCut) cutsMade++;
-        // Find best round
         (live.rounds || []).forEach((r) => {
           if (r != null && r < bestRound) bestRound = r;
         });
       }
-      return {
-        pickName,
-        live,
-        found: !!live,
-      };
+      return { pickName, live, found: !!live };
     });
 
     return {
@@ -235,15 +222,41 @@ export default function MastersPool() {
     };
   });
 
-  // Sort by total score (lowest wins)
+  // Sort by total combined score (lowest wins for pool standings)
   const sorted = [...poolStandings].sort((a, b) => a.totalScore - b.totalScore);
 
-  // Determine category winners
+  // ─── Determine Category Winners ─────────────────────────
   const winners = {};
-  if (sorted.length > 0) winners.overall = sorted[0].name;
-  if (sorted.length > 1) winners.second = sorted[1].name;
+  const winnersGolfer = {};
 
-  // Low round
+  // 1st & 2nd Place: based on individual golfer tournament position
+  // Sort ESPN golfers by score to par (lowest = best)
+  const sortedEspnGolfers = [...espnGolfers]
+    .filter((g) => !g.isCut)
+    .sort((a, b) => a.scoreToPar - b.scoreToPar);
+
+  if (sortedEspnGolfers.length > 0) {
+    const topGolfer = sortedEspnGolfers[0];
+    const owner1st = POOL_PLAYERS.find((p) =>
+      p.golfers.some((g) => matchGolfer(g, [topGolfer]))
+    );
+    if (owner1st) {
+      winners.overall = owner1st.name;
+      winnersGolfer.overall = topGolfer.name;
+    }
+  }
+  if (sortedEspnGolfers.length > 1) {
+    const secondGolfer = sortedEspnGolfers[1];
+    const owner2nd = POOL_PLAYERS.find((p) =>
+      p.golfers.some((g) => matchGolfer(g, [secondGolfer]))
+    );
+    if (owner2nd) {
+      winners.second = owner2nd.name;
+      winnersGolfer.second = secondGolfer.name;
+    }
+  }
+
+  // Low round: individual golfer's lowest single round score
   const withRounds = sorted.filter((p) => p.bestRound != null);
   if (withRounds.length > 0) {
     const best = Math.min(...withRounds.map((p) => p.bestRound));
@@ -372,6 +385,11 @@ export default function MastersPool() {
               }}>
                 {winners[key] || "TBD"}
               </div>
+              {winnersGolfer[key] && (
+                <div style={{ fontSize: "9px", color: "#a8c5a0", marginTop: "2px" }}>
+                  ({winnersGolfer[key]})
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -391,7 +409,7 @@ export default function MastersPool() {
           {activeTab === "leaderboard" && (
             <div>
               <p style={{ color: "#a8c5a0", fontSize: "13px", marginTop: 0, marginBottom: "16px" }}>
-                Combined scores to par across each player&apos;s 9 golfers. Updates live.
+                Combined scores to par across each player&apos;s 9 golfers. 1st/2nd place prizes go to the player who drafted the top individual golfer.
               </p>
 
               {sorted.map((player, i) => (
@@ -440,16 +458,6 @@ export default function MastersPool() {
                     }}>
                       {formatScore(player.totalScore)}
                     </div>
-                    {i < 2 && (
-                      <div style={{
-                        fontSize: "12px", color: "#c9a84c",
-                        background: "rgba(201,168,76,0.15)",
-                        borderRadius: "4px", padding: "3px 8px",
-                        fontWeight: "bold",
-                      }}>
-                        ${CATEGORIES[i === 0 ? "overall" : "second"].payout}
-                      </div>
-                    )}
                   </div>
 
                   {/* Expanded golfer details */}
@@ -603,7 +611,6 @@ export default function MastersPool() {
                       {espnGolfers
                         .sort((a, b) => a.scoreToPar - b.scoreToPar)
                         .map((golfer, i) => {
-                          // Find which pool player(s) picked this golfer
                           const pickedBy = POOL_PLAYERS.filter((p) =>
                             p.golfers.some((g) => matchGolfer(g, [golfer]))
                           ).map((p) => p.name);
