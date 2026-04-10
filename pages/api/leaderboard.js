@@ -5,23 +5,43 @@
 let cache = { data: null, timestamp: 0 };
 const CACHE_TTL = 60 * 1000;
 
+// Normalize name for matching between ESPN and Masters.com.
+// Handles Nordic chars (ø/æ/å) which NFD doesn't decompose.
+function normName(name) {
+  return (name || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/ø/gi, "o")
+    .replace(/æ/gi, "ae")
+    .replace(/å/gi, "a")
+    .replace(/ð/gi, "d")
+    .replace(/þ/gi, "th")
+    .toLowerCase()
+    .replace(/[^a-z\s-]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 // Fetch hole-by-hole data from masters.com (graceful fallback)
 async function fetchMastersScorecard() {
   try {
     const year = new Date().getFullYear();
     const resp = await fetch(
       `https://www.masters.com/en_US/scores/feeds/${year}/scores.json`,
-      { headers: { "User-Agent": "MastersPool/1.0", Accept: "application/json" }, signal: AbortSignal.timeout(5000) }
+      {
+        headers: { "User-Agent": "MastersPool/1.0", Accept: "application/json" },
+        signal: AbortSignal.timeout(5000),
+      }
     );
     if (!resp.ok) return null;
     const raw = await resp.json();
     const players = raw?.data?.player || [];
     const pars = raw?.data?.pars || {};
 
-    // Build a map: playerName -> { eagles, birdies, bogeys, doublePlus }
+    // Build a map: normalizedName -> { eagles, birdies, bogeys, doublePlus }
     const scorecardMap = {};
     for (const p of players) {
-      const name = p.full_name || `${p.first_name} ${p.last_name}`;
+      const name = p.full_name || `${p.first_name || ""} ${p.last_name || ""}`;
       let eagles = 0, birdies = 0, bogeys = 0, doublePlus = 0;
 
       for (const roundKey of ["round1", "round2", "round3", "round4"]) {
@@ -33,7 +53,10 @@ async function fetchMastersScorecard() {
           const score = round.scores[i];
           const par = parArr[i];
           if (score == null || par == null) continue;
-          const diff = score - par;
+          const s = Number(score);
+          const pv = Number(par);
+          if (!s || !pv) continue;
+          const diff = s - pv;
           if (diff <= -2) eagles++;
           else if (diff === -1) birdies++;
           else if (diff === 1) bogeys++;
@@ -41,7 +64,13 @@ async function fetchMastersScorecard() {
         }
       }
 
-      scorecardMap[name.toLowerCase()] = { eagles, birdies, bogeys, doublePlus, bogeyPlus: bogeys + doublePlus };
+      const entry = { eagles, birdies, bogeys, doublePlus, bogeyPlus: bogeys + doublePlus };
+      // Key by normalized full name
+      scorecardMap[normName(name)] = entry;
+      // Also key by normalized "first last" from fields
+      if (p.first_name && p.last_name) {
+        scorecardMap[normName(`${p.first_name} ${p.last_name}`)] = entry;
+      }
     }
     return scorecardMap;
   } catch (err) {
@@ -50,30 +79,28 @@ async function fetchMastersScorecard() {
   }
 }
 
-// Normalize name for matching between ESPN and Masters.com
-function normName(name) {
-  return (name || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z\s-]/g, "")
-    .trim();
-}
-
 function matchScorecard(espnName, scorecardMap) {
   if (!scorecardMap) return null;
   const norm = normName(espnName);
+  if (!norm) return null;
 
   // Exact match
   if (scorecardMap[norm]) return scorecardMap[norm];
 
-  // Last name match
+  // Last name exact match (unique only)
   const lastName = norm.split(/\s+/).pop();
   const entries = Object.entries(scorecardMap);
   const lastMatches = entries.filter(([k]) => k.split(/\s+/).pop() === lastName);
   if (lastMatches.length === 1) return lastMatches[0][1];
 
-  // Partial match
+  // Last name + first initial disambiguation
+  if (lastMatches.length > 1) {
+    const firstInitial = norm.split(/\s+/)[0]?.[0];
+    const refined = lastMatches.filter(([k]) => k.split(/\s+/)[0]?.[0] === firstInitial);
+    if (refined.length === 1) return refined[0][1];
+  }
+
+  // Partial inclusion match
   const partial = entries.find(([k]) => k.includes(norm) || norm.includes(k));
   if (partial) return partial[1];
 
