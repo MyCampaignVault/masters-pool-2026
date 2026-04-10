@@ -96,7 +96,18 @@ const CATEGORIES = {
 
 // ─── Name Matching ────────────────────────────────────────────
 function normalize(name) {
-  return name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z\s-]/g, "").trim();
+  return (name || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/ø/gi, "o")
+    .replace(/æ/gi, "ae")
+    .replace(/å/gi, "a")
+    .replace(/ð/gi, "d")
+    .replace(/þ/gi, "th")
+    .toLowerCase()
+    .replace(/[^a-z\s-]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function getLastName(name) {
