@@ -218,10 +218,13 @@ export default function MastersPool() {
     winners.eagles = sorted.find((p) => p.totalEagles === maxEagles)?.name;
   }
 
-  // Most Cuts
-  const maxCuts = Math.max(...sorted.map((p) => p.cutsMade));
-  if (maxCuts > 0) {
-    winners.cuts = sorted.find((p) => p.cutsMade === maxCuts)?.name;
+  // Most Cuts (only meaningful once the cut line has been applied)
+  const cutApplied = espnGolfers.some((g) => g.isCut);
+  if (cutApplied) {
+    const maxCuts = Math.max(...sorted.map((p) => p.cutsMade));
+    if (maxCuts > 0) {
+      winners.cuts = sorted.find((p) => p.cutsMade === maxCuts)?.name;
+    }
   }
 
   // Most Bogeys+: pool player whose golfers combined for most bogeys and worse
