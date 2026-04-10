@@ -37,17 +37,17 @@ async function fetchMastersScorecard() {
     const raw = await resp.json();
     const players = raw?.data?.player || [];
     const pars = raw?.data?.pars || {};
-
     const scorecardMap = {};
     for (const p of players) {
       const name = p.full_name || `${p.first_name || ""} ${p.last_name || ""}`;
-      let eagles = 0, birdies = 0, bogeys = 0, doublePlus = 0;
-
+      let eagles = 0,
+        birdies = 0,
+        bogeys = 0,
+        doublePlus = 0;
       for (const roundKey of ["round1", "round2", "round3", "round4"]) {
         const round = p[roundKey];
         const parArr = pars[roundKey] || [];
         if (!round?.scores || parArr.length === 0) continue;
-
         for (let i = 0; i < round.scores.length; i++) {
           const score = round.scores[i];
           const par = parArr[i];
@@ -62,7 +62,6 @@ async function fetchMastersScorecard() {
           else if (diff >= 2) doublePlus++;
         }
       }
-
       const entry = { eagles, birdies, bogeys, doublePlus, bogeyPlus: bogeys + doublePlus };
       scorecardMap[normName(name)] = entry;
       if (p.first_name && p.last_name) {
@@ -80,23 +79,18 @@ function matchScorecard(espnName, scorecardMap) {
   if (!scorecardMap) return null;
   const norm = normName(espnName);
   if (!norm) return null;
-
   if (scorecardMap[norm]) return scorecardMap[norm];
-
   const lastName = norm.split(/\s+/).pop();
   const entries = Object.entries(scorecardMap);
   const lastMatches = entries.filter(([k]) => k.split(/\s+/).pop() === lastName);
   if (lastMatches.length === 1) return lastMatches[0][1];
-
   if (lastMatches.length > 1) {
     const firstInitial = norm.split(/\s+/)[0]?.[0];
     const refined = lastMatches.filter(([k]) => k.split(/\s+/)[0]?.[0] === firstInitial);
     if (refined.length === 1) return refined[0][1];
   }
-
   const partial = entries.find(([k]) => k.includes(norm) || norm.includes(k));
   if (partial) return partial[1];
-
   return null;
 }
 
@@ -122,7 +116,6 @@ export default async function handler(req, res) {
 
     const raw = await espnResp.json();
     const event = raw.events?.[0];
-
     if (!event) {
       return res.status(200).json({
         tournament: "The Masters",
@@ -176,11 +169,17 @@ export default async function handler(req, res) {
       }
 
       // Parse individual rounds - only include COMPLETED rounds.
-      // ESPN linescores include an in-progress round with partial totals
-      // (e.g. only outScore is set through 9 holes). A round is complete
-      // only when both inScore and outScore are present.
+      // ESPN populates inScore/outScore even mid-round as running partials,
+      // so we determine completion by comparing the round's period to the
+      // player's current period and thru value.
+      const playerPeriod = status.period || 1;
+      const playerThru = status.thru != null ? status.thru : 0;
       const rounds = linescores.map((l) => {
-        const isComplete = l?.inScore != null && l?.outScore != null;
+        const roundPeriod = l?.period;
+        const isPrevRound = roundPeriod != null && roundPeriod < playerPeriod;
+        const isFinishedCurrent =
+          roundPeriod != null && roundPeriod === playerPeriod && playerThru >= 18;
+        const isComplete = isPrevRound || isFinishedCurrent;
         if (!isComplete) return null;
         const v = l.value ?? l.displayValue;
         return v != null ? Number(v) : null;
@@ -193,7 +192,6 @@ export default async function handler(req, res) {
         statusName === "STATUS_WITHDRAWN";
 
       const displayName = athlete.displayName || athlete.shortName || "Unknown";
-
       const card = matchScorecard(displayName, scorecardMap);
 
       return {
@@ -202,7 +200,12 @@ export default async function handler(req, res) {
         position: status.position?.displayName || c.sortOrder?.toString() || "",
         scoreToPar,
         today,
-        thru: status.thru != null ? (status.thru === 18 ? "F" : status.thru.toString()) : status.displayValue || "",
+        thru:
+          status.thru != null
+            ? status.thru === 18
+              ? "F"
+              : status.thru.toString()
+            : status.displayValue || "",
         rounds,
         status: isCut ? "cut" : "active",
         isCut,
@@ -232,7 +235,6 @@ export default async function handler(req, res) {
     return res.status(200).json(result);
   } catch (error) {
     console.error("Leaderboard fetch error:", error.message);
-
     if (cache.data) {
       return res.status(200).json({
         ...cache.data,
@@ -240,7 +242,6 @@ export default async function handler(req, res) {
         lastUpdated: new Date(cache.timestamp).toISOString(),
       });
     }
-
     return res.status(500).json({
       tournament: "The Masters",
       status: "error",
