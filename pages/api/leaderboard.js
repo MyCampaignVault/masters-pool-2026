@@ -185,8 +185,13 @@ export default async function handler(req, res) {
         }
       }
 
-      // Parse individual rounds
+      // Parse individual rounds - only include COMPLETED rounds.
+      // ESPN linescores include an in-progress round with partial totals
+      // (e.g. only outScore is set through 9 holes). A round is complete
+      // only when both inScore and outScore are present.
       const rounds = linescores.map((l) => {
+        const isComplete = l?.inScore != null && l?.outScore != null;
+        if (!isComplete) return null;
         const v = l.value ?? l.displayValue;
         return v != null ? Number(v) : null;
       });
